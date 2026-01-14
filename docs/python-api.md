@@ -182,7 +182,7 @@ Generate audio directly from text without manually managing voice state.
 **Parameters:**
 - `text` (str): Text to synthesize.
 - `voice` (Path | str | torch.Tensor | dict): Voice prompt or a precomputed model state.
-- `preset` (str | GenerationPreset | None): Optional preset to apply (sampling parameters).
+- `preset` (str | GenerationPreset | None): Optional preset to apply (sampling parameters). For best quality, use `preset="expressive"`; for neutral behavior, use `preset="default"`.
 - `frames_after_eos` (int | None): Frames to generate after EOS detection.
 - `copy_state` (bool): Whether to copy the state before generation.
 - `truncate_voice` (bool): Truncate voice prompts longer than 30s.

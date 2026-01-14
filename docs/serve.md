@@ -14,7 +14,7 @@ This starts a server on `http://localhost:8000` with the default voice model.
 
 ## Command Options
 
-- `--voice VOICE`: Path to voice prompt audio file (voice to clone) (default: "hf://kyutai/tts-voices/alba-mackenna/casual.wav")
+- `--voice VOICE`: Path to voice prompt audio file (voice to clone) (default: "alba")
 - `--host HOST`: Host to bind to (default: "localhost")
 - `--port PORT`: Port to bind to (default: 8000)
 - `--reload`: Enable auto-reload for development
@@ -35,10 +35,10 @@ pocket-tts serve --host "localhost" --port 8080
 
 ```bash
 # Use different voice
-pocket-tts serve --default-voice "hf://kyutai/tts-voices/jessica-jian/casual.wav"
+pocket-tts serve --voice "hf://kyutai/tts-voices/jessica-jian/casual.wav"
 
 # Use local voice file
-pocket-tts serve --default-voice "./my_voice.wav"
+pocket-tts serve --voice "./my_voice.wav"
 ```
 
 ## Web Interface
@@ -51,7 +51,8 @@ For more advanced usage, see the [Python API documentation](python-api.md) for d
 
 The `/tts` endpoint accepts an optional `ssml=true` form field to interpret `text` as SSML-lite.
 Supported tags: `<voice>`, `<break>`, `<prosody>`, and `<emphasis>`.
-You can also pass `preset` to apply a sampling preset.
+The server defaults to the `expressive` preset for best quality; pass `preset=default` for a neutral baseline.
+You can also pass `preset` to apply a sampling preset explicitly.
 `<prosody>` supports a `preset` attribute to set it directly.
 `rate="slow"` inserts short pauses between words and time-stretches the segment. `<emphasis>` adds a small gain boost.
 Segments under `<emphasis>` and `<prosody>` are RMS-normalized. Time-stretching uses resampling and will also shift pitch slightly.

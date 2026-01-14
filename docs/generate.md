@@ -17,10 +17,10 @@ This will generate a WAV file `./tts_output.wav` with the default text and voice
 ### Core Options
 
 - `--text TEXT`: Text to generate (default: "Hello world! I am Kyutai Pocket TTS. I'm fast enough to run on small CPUs. I hope you'll like me.")
-- `--voice VOICE`: Path to audio conditioning file (voice to clone) (default: "hf://kyutai/tts-voices/alba-mackenna/casual.wav"). Urls and local paths are supported.
+- `--voice VOICE`: Path to audio conditioning file (voice to clone) (default: "alba"). Urls and local paths are supported.
 - `--output-path OUTPUT_PATH`: Output path for generated audio (default: "./tts_output.wav")
 - `--ssml`: Interpret `--text` as SSML-lite markup (supports `<voice>`, `<break>`, `<prosody>`, and `<emphasis>`).
-- `--preset PRESET`: Sampling preset to apply (examples: `broadcast`, `calm`, `expressive`, `dramatic`, `slow`, `fast`).
+- `--preset PRESET`: Sampling preset to apply (default: `expressive`; examples: `broadcast`, `calm`, `expressive`, `dramatic`, `slow`, `fast`). Use `--preset default` for a neutral baseline.
 
 ### Generation Parameters
 

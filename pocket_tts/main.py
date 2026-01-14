@@ -24,6 +24,7 @@ from pocket_tts.default_parameters import (
     DEFAULT_FRAMES_AFTER_EOS,
     DEFAULT_LSD_DECODE_STEPS,
     DEFAULT_NOISE_CLAMP,
+    DEFAULT_PRESET,
     DEFAULT_TEMPERATURE,
     DEFAULT_VARIANT,
 )
@@ -45,7 +46,9 @@ logger = logging.getLogger(__name__)
 cli_app = typer.Typer(
     help="Kyutai Pocket TTS - Text-to-Speech generation tool", pretty_exceptions_show_locals=False
 )
-PRESET_HELP = f"Preset to use. Available: {', '.join(list_presets())}"
+PRESET_HELP = (
+    f"Preset to use (default: {DEFAULT_PRESET}). Available: {', '.join(list_presets())}"
+)
 _MAX_VOICE_BYTES = int(os.environ.get("POCKET_TTS_MAX_VOICE_BYTES", str(20 * 1024 * 1024)))
 _MAX_VOICE_SECONDS = float(os.environ.get("POCKET_TTS_MAX_VOICE_SECONDS", "30"))
 
@@ -90,7 +93,7 @@ async def health():
 
 @web_app.get("/presets")
 async def presets():
-    return {"presets": list_presets_data(), "default": "default"}
+    return {"presets": list_presets_data(), "default": DEFAULT_PRESET}
 
 
 @web_app.get("/voices")
@@ -362,7 +365,7 @@ def text_to_speech(
 
     # Use the appropriate model state
     default_voice = None
-    default_preset = None
+    default_preset = get_preset(DEFAULT_PRESET)
     if preset is not None:
         try:
             default_preset = get_preset(preset)
@@ -508,8 +511,9 @@ def generate(
         tts_model.to(device)
 
         model_state_for_voice = tts_model.get_state_for_audio_prompt(voice)
-        preset_value = None
-        if preset is not None:
+        if preset is None:
+            preset_value = get_preset(DEFAULT_PRESET)
+        else:
             try:
                 preset_value = get_preset(preset)
             except ValueError as exc:

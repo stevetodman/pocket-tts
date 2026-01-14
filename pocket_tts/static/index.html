@@ -501,17 +501,27 @@
                 if (!response.ok) return;
                 const data = await response.json();
                 const presets = data.presets || [];
+                const defaultPreset = data.default || '';
                 presetInput.innerHTML = '';
                 const defaultOption = document.createElement('option');
                 defaultOption.value = '';
-                defaultOption.textContent = 'Default';
+                if (defaultPreset) {
+                    const label =
+                        defaultPreset[0].toUpperCase() + defaultPreset.slice(1);
+                    defaultOption.textContent = `Server default (${label})`;
+                } else {
+                    defaultOption.textContent = 'Server default';
+                }
                 presetInput.appendChild(defaultOption);
                 presets
-                    .filter((preset) => preset.name !== 'default')
                     .forEach((preset) => {
                         const option = document.createElement('option');
                         option.value = preset.name;
-                        option.textContent = preset.name[0].toUpperCase() + preset.name.slice(1);
+                        if (preset.name === 'default') {
+                            option.textContent = 'Neutral (default)';
+                        } else {
+                            option.textContent = preset.name[0].toUpperCase() + preset.name.slice(1);
+                        }
                         presetInput.appendChild(option);
                     });
             } catch (error) {

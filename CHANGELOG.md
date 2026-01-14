@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Streaming responses now skip time-stretching to preserve low latency; CLI/file output keeps full preset effects.
+- CLI and server defaults now use the `expressive` preset for higher-quality output (use `default` for neutral).
 - Long text generation carries conditioning across chunks for smoother continuity.
 - Voice prompt handling enforces mono shape, non-empty input, and improved WAV parsing.
 - Download logic now streams, retries, and enforces size caps (HTTP downloads).
