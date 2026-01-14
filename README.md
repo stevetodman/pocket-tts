@@ -44,6 +44,7 @@ uvx pocket-tts generate
 pocket-tts generate
 ```
 Modify the voice with `--voice` and the text with `--text`. We provide a small catalog of voices.
+You can also pass `--ssml` to enable a minimal SSML-like syntax with `<voice>`, `<break>`, `<prosody>`, and `<emphasis>` tags, plus `--preset` to pick sampling presets (slow rate inserts word pauses and time-stretching).
 
 You can take a look at [this page](https://huggingface.co/kyutai/tts-voices) which details the licenses
 for each voice.

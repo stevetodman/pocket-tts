@@ -1,5 +1,7 @@
 """Integration tests for the CLI generate command using real implementation."""
 
+import pytest
+
 from typer.testing import CliRunner
 
 from pocket_tts.data.audio import audio_read
@@ -9,6 +11,14 @@ from pocket_tts.main import cli_app
 other_voice = "https://huggingface.co/kyutai/tts-voices/resolve/main/expresso/ex01-ex02_default_001_channel1_168s.wav"
 
 runner = CliRunner()
+
+
+def _skip_if_no_voice_cloning():
+    from pocket_tts import TTSModel
+
+    model = TTSModel.load_model()
+    if not model.has_voice_cloning:
+        pytest.skip("Voice cloning weights are unavailable in this environment.")
 
 
 def test_generate_basic_usage(tmp_path):
@@ -34,6 +44,7 @@ def test_generate_basic_usage(tmp_path):
 
 def test_generate_with_custom_voice(tmp_path):
     """Test generate command with custom voice prompt."""
+    _skip_if_no_voice_cloning()
     output_file = tmp_path / "custom_voice_test.wav"
 
     result = runner.invoke(

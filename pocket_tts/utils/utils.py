@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -17,6 +18,12 @@ PREDEFINED_VOICES = {
     x: f"hf://kyutai/pocket-tts-without-voice-cloning/embeddings/{x}.safetensors@d4fdd22ae8c8e1cb3634e150ebeff1dab2d16df3"
     for x in _voices_names
 }
+
+_DEFAULT_DOWNLOAD_TIMEOUT_SEC = float(os.environ.get("POCKET_TTS_DOWNLOAD_TIMEOUT", "30"))
+_DEFAULT_DOWNLOAD_RETRIES = int(os.environ.get("POCKET_TTS_DOWNLOAD_RETRIES", "3"))
+_DEFAULT_MAX_DOWNLOAD_MB = int(os.environ.get("POCKET_TTS_MAX_DOWNLOAD_MB", "1024"))
+_DEFAULT_MAX_DOWNLOAD_BYTES = _DEFAULT_MAX_DOWNLOAD_MB * 1024 * 1024
+_DEFAULT_CONNECT_TIMEOUT_SEC = float(os.environ.get("POCKET_TTS_DOWNLOAD_CONNECT_TIMEOUT", "5"))
 
 
 def make_cache_directory() -> Path:
@@ -65,6 +72,42 @@ class display_execution_time:
         return False  # Don't suppress exceptions
 
 
+def _download_http_with_retries(url: str, destination: Path) -> Path:
+    max_bytes = _DEFAULT_MAX_DOWNLOAD_BYTES
+    timeout = (_DEFAULT_CONNECT_TIMEOUT_SEC, _DEFAULT_DOWNLOAD_TIMEOUT_SEC)
+    last_exc = None
+    for attempt in range(_DEFAULT_DOWNLOAD_RETRIES):
+        tmp_path = destination.with_suffix(destination.suffix + ".partial")
+        try:
+            with requests.get(url, stream=True, timeout=timeout) as response:
+                response.raise_for_status()
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > max_bytes:
+                    raise ValueError(
+                        f"Download size {content_length} exceeds limit {max_bytes} bytes for {url}"
+                    )
+                total = 0
+                with open(tmp_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise ValueError(
+                                f"Download exceeded limit {max_bytes} bytes for {url}"
+                            )
+                        f.write(chunk)
+            tmp_path.replace(destination)
+            return destination
+        except Exception as exc:
+            last_exc = exc
+            if tmp_path.exists():
+                tmp_path.unlink()
+            if attempt < _DEFAULT_DOWNLOAD_RETRIES - 1:
+                time.sleep(0.5 * (attempt + 1))
+    raise last_exc
+
+
 def download_if_necessary(file_path: str) -> Path:
     if file_path.startswith("http://") or file_path.startswith("https://"):
         cache_dir = make_cache_directory()
@@ -72,10 +115,7 @@ def download_if_necessary(file_path: str) -> Path:
             hashlib.sha256(file_path.encode()).hexdigest() + "." + file_path.split(".")[-1]
         )
         if not cached_file.exists():
-            response = requests.get(file_path)
-            response.raise_for_status()
-            with open(cached_file, "wb") as f:
-                f.write(response.content)
+            _download_http_with_retries(file_path, cached_file)
         return cached_file
     elif file_path.startswith("hf://"):
         file_path = file_path.removeprefix("hf://")

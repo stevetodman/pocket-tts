@@ -46,3 +46,31 @@ pocket-tts serve --default-voice "./my_voice.wav"
 Once the server is running, navigate to `http://localhost:8000` to access the web interface.
 
 For more advanced usage, see the [Python API documentation](python-api.md) for direct integration with the TTS model.
+
+## SSML-lite in the API
+
+The `/tts` endpoint accepts an optional `ssml=true` form field to interpret `text` as SSML-lite.
+Supported tags: `<voice>`, `<break>`, `<prosody>`, and `<emphasis>`.
+You can also pass `preset` to apply a sampling preset.
+`<prosody>` supports a `preset` attribute to set it directly.
+`rate="slow"` inserts short pauses between words and time-stretches the segment. `<emphasis>` adds a small gain boost.
+Segments under `<emphasis>` and `<prosody>` are RMS-normalized. Time-stretching uses resampling and will also shift pitch slightly.
+For streaming responses, time-stretching is skipped to preserve low latency; use the CLI for full time-scale effects.
+
+```bash
+curl -X POST http://localhost:8000/tts \
+  -F 'text=<speak>Hello <break time="250ms"/> there.</speak>' \
+  -F 'ssml=true' \
+  -F 'preset=broadcast' \
+  --output tts_output.wav
+```
+
+## Metadata Endpoints
+
+Use these to populate UIs or validate inputs:
+
+```bash
+curl http://localhost:8000/presets
+curl http://localhost:8000/voices
+curl http://localhost:8000/metadata
+```

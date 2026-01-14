@@ -35,6 +35,12 @@
             <label for="voice-url-input" class="block text-sm font-medium text-gray-700 mb-2">
                 Optional voice URL (leave empty to use default voice):
             </label>
+            <select
+                id="voice-select"
+                class="w-full border rounded p-2 mb-2"
+            >
+                <option value="">Select a predefined voice…</option>
+            </select>
             <input
                 type="text"
                 id="voice-url-input"
@@ -64,7 +70,45 @@
             </p>
         </div>
 
-        
+        <div class="bg-white p-4 rounded-lg shadow space-y-3">
+            <div class="flex items-center justify-between">
+                <label for="ssml-toggle" class="text-sm font-medium text-gray-700">
+                    SSML-lite mode
+                </label>
+                <div class="flex items-center space-x-3">
+                    <input type="checkbox" id="ssml-toggle" class="h-4 w-4">
+                    <button
+                        id="ssml-example-btn"
+                        class="text-xs text-blue-600 hover:underline"
+                        type="button"
+                    >
+                        Load SSML example
+                    </button>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500">
+                Supports &lt;voice&gt;, &lt;break&gt;, &lt;prosody&gt;, &lt;emphasis&gt; tags. Slow rate adds word pauses and time-stretching.
+            </p>
+
+            <div>
+                <label for="preset-input" class="block text-sm font-medium text-gray-700 mb-2">
+                    Preset (optional)
+                </label>
+                <select id="preset-input" class="w-full border rounded p-2">
+                    <option value="">Default</option>
+                    <option value="broadcast">Broadcast</option>
+                    <option value="calm">Calm</option>
+                    <option value="expressive">Expressive</option>
+                    <option value="dramatic">Dramatic</option>
+                    <option value="slow">Slow</option>
+                    <option value="fast">Fast</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">
+                    Presets adjust sampling settings to bias toward clarity or energy.
+                </p>
+            </div>
+        </div>
+
         <button
             id="generate-btn"
             class="w-full px-4 py-2 rounded text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
@@ -229,9 +273,32 @@
         const audioSection = document.getElementById('audio-section');
         const audio = document.getElementById('audio');
         const downloadLink = document.getElementById('download-link');
+        const voiceSelect = document.getElementById('voice-select');
+        const ssmlToggle = document.getElementById('ssml-toggle');
+        const ssmlExampleBtn = document.getElementById('ssml-example-btn');
+        const presetInput = document.getElementById('preset-input');
+
+        const ssmlExample = [
+            '<speak>',
+            '  <voice name="alba">Hello there.</voice>',
+            '  <break time="250ms"/>',
+            '  <emphasis level="strong">This part is emphasized.</emphasis>',
+            '  <prosody rate="slow">And this part is slower.</prosody>',
+            '</speak>',
+        ].join('\n');
 
         // Event listeners
         generateBtn.addEventListener('click', generateAudio);
+        ssmlExampleBtn.addEventListener('click', () => {
+            textInput.value = ssmlExample;
+            ssmlToggle.checked = true;
+            textInput.focus();
+        });
+        voiceSelect.addEventListener('change', () => {
+            if (voiceSelect.value) {
+                document.getElementById('voice-url-input').value = voiceSelect.value;
+            }
+        });
 
         function showStatus(message, isLoading = false) {
             statusText.textContent = message;
@@ -243,6 +310,30 @@
             status.classList.add('hidden');
         }
 
+        function normalizeSsmlMarkup(xmlInput) {
+            // Help avoid common copy/paste issues like `</\nvoice>` which is invalid XML.
+            return xmlInput.replace(/<\s*(\/?)\s*([A-Za-z_][\w:.-]*)/g, '<$1$2');
+        }
+
+        function wrapInSpeakTagIfNeeded(text) {
+            const trimmed = text.trim();
+            if (/^<\s*speak[\s>]/i.test(trimmed)) {
+                return trimmed;
+            }
+            return `<speak>${trimmed}</speak>`;
+        }
+
+        function validateSsml(text) {
+            const normalized = normalizeSsmlMarkup(wrapInSpeakTagIfNeeded(text));
+            const doc = new DOMParser().parseFromString(normalized, 'application/xml');
+            const parserError = doc.getElementsByTagName('parsererror')[0];
+            if (!parserError) {
+                return null;
+            }
+            const message = (parserError.textContent || 'Invalid SSML.').trim();
+            return message.split('\n')[0] || 'Invalid SSML.';
+        }
+
         async function generateAudio() {
             const text = textInput.value.trim();
 
@@ -250,6 +341,14 @@
                 showStatus('Please enter some text to generate speech.', false);
                 setTimeout(hideStatus, 3000);
                 return;
+            }
+
+            if (ssmlToggle.checked) {
+                const validationError = validateSsml(text);
+                if (validationError) {
+                    showStatus(`SSML parse error: ${validationError}`, false);
+                    return;
+                }
             }
 
             // Stop any currently playing audio
@@ -280,6 +379,14 @@
             try {
                 const formData = new FormData();
                 formData.append('text', text);
+                if (ssmlToggle.checked) {
+                    formData.append('ssml', 'true');
+                }
+
+                const presetValue = presetInput.value.trim();
+                if (presetValue) {
+                    formData.append('preset', presetValue);
+                }
 
                 // Add voice URL if provided (only if no WAV file is uploaded)
                 const voiceUrl = document.getElementById('voice-url-input').value.trim();
@@ -299,7 +406,24 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`Server error: ${response.status}`);
+                    let detail = `Server error: ${response.status}`;
+                    try {
+                        const contentType = response.headers.get('content-type') || '';
+                        if (contentType.includes('application/json')) {
+                            const data = await response.json();
+                            if (typeof data?.detail === 'string') {
+                                detail = data.detail;
+                            } else if (data?.detail) {
+                                detail = JSON.stringify(data.detail);
+                            }
+                        } else {
+                            const text = await response.text();
+                            if (text) detail = text;
+                        }
+                    } catch {
+                        // Best-effort error parsing.
+                    }
+                    throw new Error(detail);
                 }
 
                 // Clone the response for both streaming and blob collection
@@ -357,7 +481,6 @@
             } catch (error) {
                 console.error('Error generating audio:', error);
                 showStatus(`Error: ${error.message}`, false);
-                setTimeout(hideStatus, 3000);
             } finally {
                 // Re-enable button
                 generateBtn.disabled = false;
@@ -368,7 +491,50 @@
         // Focus on text input when page loads
         window.addEventListener('load', () => {
             textInput.focus();
+            loadPresets();
+            loadVoices();
         });
+
+        async function loadPresets() {
+            try {
+                const response = await fetch('/presets');
+                if (!response.ok) return;
+                const data = await response.json();
+                const presets = data.presets || [];
+                presetInput.innerHTML = '';
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = 'Default';
+                presetInput.appendChild(defaultOption);
+                presets
+                    .filter((preset) => preset.name !== 'default')
+                    .forEach((preset) => {
+                        const option = document.createElement('option');
+                        option.value = preset.name;
+                        option.textContent = preset.name[0].toUpperCase() + preset.name.slice(1);
+                        presetInput.appendChild(option);
+                    });
+            } catch (error) {
+                console.warn('Failed to load presets', error);
+            }
+        }
+
+        async function loadVoices() {
+            try {
+                const response = await fetch('/voices');
+                if (!response.ok) return;
+                const data = await response.json();
+                const voices = data.voices || [];
+                voices.forEach((voice) => {
+                    const option = document.createElement('option');
+                    option.value = voice.name;
+                    option.textContent = voice.name;
+                    voiceSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.warn('Failed to load voices', error);
+            }
+        }
     </script>
 </body>
 </html>

@@ -24,13 +24,31 @@ def audio_read(filepath: str | Path) -> tuple[torch.Tensor, int]:
     """Read audio using Python's wave module."""
     with wave.open(str(filepath), "rb") as wav_file:
         sample_rate = wav_file.getframerate()
+        num_channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
 
-        # Read all audio data as 16-bit signed integers
+        # Read all audio data with the correct PCM width.
         raw_data = wav_file.readframes(-1)
-        samples = np.frombuffer(raw_data, dtype=np.int16).astype(np.float32) / 32768.0
+        if sample_width == 1:
+            samples = np.frombuffer(raw_data, dtype=np.uint8).astype(np.float32)
+            samples = (samples - 128.0) / 128.0
+        elif sample_width == 2:
+            samples = np.frombuffer(raw_data, dtype=np.int16).astype(np.float32) / 32768.0
+        elif sample_width == 4:
+            samples = np.frombuffer(raw_data, dtype=np.int32).astype(np.float32) / 2147483648.0
+        else:
+            raise ValueError(
+                f"Unsupported WAV sample width: {sample_width} bytes (path={filepath})"
+            )
+        if num_channels <= 0:
+            raise ValueError(f"Invalid channel count in WAV file: {num_channels} (path={filepath})")
 
-        # Return as mono tensor (channels, samples)
-        wav = torch.from_numpy(samples.reshape(1, -1))
+        # Return as (channels, samples)
+        if samples.size % num_channels != 0:
+            raise ValueError(
+                f"WAV data length is not divisible by channel count ({num_channels})"
+            )
+        wav = torch.from_numpy(samples.reshape(-1, num_channels).T)
         return wav, sample_rate
 
 

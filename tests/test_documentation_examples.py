@@ -4,11 +4,20 @@
 import pytest
 
 
+def _skip_if_no_voice_cloning():
+    from pocket_tts import TTSModel
+
+    model = TTSModel.load_model()
+    if not model.has_voice_cloning:
+        pytest.skip("Voice cloning weights are unavailable in this environment.")
+
+
 def test_readme_example():
     import scipy.io.wavfile
 
     from pocket_tts import TTSModel
 
+    _skip_if_no_voice_cloning()
     tts_model = TTSModel.load_model()
     voice_state = tts_model.get_state_for_audio_prompt(
         "hf://kyutai/tts-voices/alba-mackenna/casual.wav"
@@ -23,6 +32,7 @@ def test_quick_start():
 
     from pocket_tts import TTSModel
 
+    _skip_if_no_voice_cloning()
     # Load the model
     tts_model = TTSModel.load_model()
 
@@ -68,6 +78,7 @@ def test_sample_rate():
 def make_my_voice_file():
     import requests
 
+    _skip_if_no_voice_cloning()
     url = "https://huggingface.co/kyutai/tts-voices/resolve/main/expresso/ex01-ex02_default_001_channel1_168s.wav"
     response = requests.get(url)
     with open("my_voice.wav", "wb") as f:
@@ -78,6 +89,7 @@ def make_my_voice_file():
 def test_get_state_for_audio_prompt():
     from pocket_tts import TTSModel
 
+    _skip_if_no_voice_cloning()
     model = TTSModel.load_model()
     # From HuggingFace URL
     voice_state = model.get_state_for_audio_prompt(
@@ -97,6 +109,7 @@ def test_get_state_for_audio_prompt():
 def test_generate_audio():
     from pocket_tts import TTSModel
 
+    _skip_if_no_voice_cloning()
     model = TTSModel.load_model()
 
     voice_state = model.get_state_for_audio_prompt(
@@ -113,6 +126,7 @@ def test_generate_audio():
 def test_generate_audio_stream():
     from pocket_tts import TTSModel
 
+    _skip_if_no_voice_cloning()
     model = TTSModel.load_model()
 
     voice_state = model.get_state_for_audio_prompt(
@@ -128,6 +142,7 @@ def test_generate_audio_stream():
 def test_voice_management():
     from pocket_tts import TTSModel
 
+    _skip_if_no_voice_cloning()
     model = TTSModel.load_model()
     # Preload multiple voices
     voices = {
@@ -150,6 +165,7 @@ def test_batch_processing():
 
     from pocket_tts import TTSModel
 
+    _skip_if_no_voice_cloning()
     model = TTSModel.load_model()
 
     voice_state = model.get_state_for_audio_prompt(

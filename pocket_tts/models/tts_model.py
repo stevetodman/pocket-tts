@@ -18,12 +18,14 @@ from pocket_tts.conditioners.base import TokenizedText
 from pocket_tts.data.audio import audio_read
 from pocket_tts.data.audio_utils import convert_audio
 from pocket_tts.default_parameters import (
+    DEFAULT_AUDIO_PROMPT,
     DEFAULT_EOS_THRESHOLD,
     DEFAULT_LSD_DECODE_STEPS,
     DEFAULT_NOISE_CLAMP,
     DEFAULT_TEMPERATURE,
     DEFAULT_VARIANT,
 )
+from pocket_tts.presets import GenerationPreset, get_preset, use_preset
 from pocket_tts.models.flow_lm import FlowLMModel
 from pocket_tts.models.mimi import MimiModel
 from pocket_tts.modules import mimi_transformer
@@ -40,7 +42,8 @@ from pocket_tts.utils.utils import (
 )
 from pocket_tts.utils.weights_loading import get_flow_lm_state_dict, get_mimi_state_dict
 
-torch.set_num_threads(1)
+_TORCH_THREADS = int(os.environ.get("POCKET_TTS_TORCH_THREADS", "1"))
+torch.set_num_threads(_TORCH_THREADS)
 logger = logging.getLogger(__name__)
 
 
@@ -62,6 +65,7 @@ class TTSModel(nn.Module):
         self.eos_threshold = eos_threshold
         self.config = config
         self.has_voice_cloning = True
+        self._init_voice_prompt_cache()
 
     @property
     def device(self) -> str:
@@ -330,9 +334,9 @@ class TTSModel(nn.Module):
                 If False, modifies the input state in-place. Defaults to True.
 
         Returns:
-            torch.Tensor: Generated audio tensor with shape [channels, samples]
-                at the model's sample rate (typically 24kHz). The audio is
-                normalized and ready for playback or saving.
+            torch.Tensor: Generated audio tensor with shape [samples] at the
+                model's sample rate (typically 24kHz). The audio is normalized
+                and ready for playback or saving.
                 You can get the sample rate from the `sample_rate` attribute.
 
         Raises:
@@ -399,20 +403,92 @@ class TTSModel(nn.Module):
         # TODO: add the teacher forcing method for long texts where we use the audio of one chunk
         # as conditioning for the next chunk.
         chunks = split_into_best_sentences(self.flow_lm.conditioner.tokenizer, text_to_generate)
+        continuation_audio = None
 
-        for chunk in chunks:
-            text_to_generate, frames_after_eos_guess = prepare_text_prompt(chunk)
-            frames_after_eos_guess += 2
+        for chunk_index, chunk in enumerate(chunks):
+            prepared_text, frames_after_eos_guess = prepare_text_prompt(chunk)
+            if frames_after_eos is None:
+                frames_after_eos_value = frames_after_eos_guess + 2
+            else:
+                frames_after_eos_value = frames_after_eos
+            chunk_state = model_state
+            if copy_state:
+                chunk_state = copy.deepcopy(model_state)
+            if continuation_audio is not None and copy_state:
+                self._apply_audio_continuation(chunk_state, continuation_audio)
+            audio_accumulator: list[torch.Tensor] = []
             yield from self._generate_audio_stream_short_text(
-                model_state=model_state,
-                text_to_generate=chunk,
-                frames_after_eos=frames_after_eos_guess,
+                model_state=chunk_state,
+                text_to_generate=prepared_text,
+                frames_after_eos=frames_after_eos_value,
+                copy_state=False,
+                audio_accumulator=audio_accumulator,
+            )
+            if chunk_index < len(chunks) - 1 and audio_accumulator:
+                continuation_audio = torch.cat(audio_accumulator, dim=0)
+
+    def _resolve_preset(self, preset: str | GenerationPreset | None) -> GenerationPreset | None:
+        if preset is None or isinstance(preset, GenerationPreset):
+            return preset
+        return get_preset(preset)
+
+    def _resolve_model_state(
+        self,
+        voice_or_state: dict | Path | str | torch.Tensor,
+        truncate_voice: bool,
+    ) -> dict:
+        if isinstance(voice_or_state, dict):
+            return voice_or_state
+        return self.get_state_for_audio_prompt(voice_or_state, truncate=truncate_voice)
+
+    @torch.no_grad
+    def generate_audio_from_text(
+        self,
+        text: str,
+        voice: dict | Path | str | torch.Tensor = DEFAULT_AUDIO_PROMPT,
+        preset: str | GenerationPreset | None = None,
+        frames_after_eos: int | None = None,
+        copy_state: bool = True,
+        truncate_voice: bool = False,
+    ) -> torch.Tensor:
+        preset_value = self._resolve_preset(preset)
+        model_state = self._resolve_model_state(voice, truncate_voice)
+        with use_preset(self, preset_value):
+            return self.generate_audio(
+                model_state,
+                text_to_generate=text,
+                frames_after_eos=frames_after_eos,
+                copy_state=copy_state,
+            )
+
+    @torch.no_grad
+    def generate_audio_stream_from_text(
+        self,
+        text: str,
+        voice: dict | Path | str | torch.Tensor = DEFAULT_AUDIO_PROMPT,
+        preset: str | GenerationPreset | None = None,
+        frames_after_eos: int | None = None,
+        copy_state: bool = True,
+        truncate_voice: bool = False,
+    ):
+        preset_value = self._resolve_preset(preset)
+        model_state = self._resolve_model_state(voice, truncate_voice)
+        with use_preset(self, preset_value):
+            yield from self.generate_audio_stream(
+                model_state,
+                text_to_generate=text,
+                frames_after_eos=frames_after_eos,
                 copy_state=copy_state,
             )
 
     @torch.no_grad
     def _generate_audio_stream_short_text(
-        self, model_state: dict, text_to_generate: str, frames_after_eos: int, copy_state: bool
+        self,
+        model_state: dict,
+        text_to_generate: str,
+        frames_after_eos: int,
+        copy_state: bool,
+        audio_accumulator: list[torch.Tensor] | None = None,
     ):
         if copy_state:
             model_state = copy.deepcopy(model_state)
@@ -430,13 +506,19 @@ class TTSModel(nn.Module):
         decoder_thread.start()
 
         # Generate latents and add them to queue (decoder processes them in parallel)
-        self._generate(
-            model_state=model_state,
-            text_to_generate=text_to_generate,
-            frames_after_eos=frames_after_eos,
-            latents_queue=latents_queue,
-            result_queue=result_queue,
-        )
+        try:
+            self._generate(
+                model_state=model_state,
+                text_to_generate=text_to_generate,
+                frames_after_eos=frames_after_eos,
+                latents_queue=latents_queue,
+                result_queue=result_queue,
+            )
+        except Exception:
+            latents_queue.put(None)
+            with display_execution_time("Waiting for mimi decoder to finish"):
+                decoder_thread.join()
+            raise
 
         # Stream audio chunks as they become available
         total_generated_samples = 0
@@ -446,7 +528,10 @@ class TTSModel(nn.Module):
                 # Audio chunk available immediately for streaming/playback
                 audio_chunk = result[1]
                 total_generated_samples += audio_chunk.shape[-1]
-                yield audio_chunk[0, 0]  # Remove batch, channel
+                audio_slice = audio_chunk[0, 0]  # Remove batch, channel
+                if audio_accumulator is not None:
+                    audio_accumulator.append(audio_slice.detach())
+                yield audio_slice
             elif result[0] == "done":
                 # Generation complete
                 break
@@ -466,14 +551,20 @@ class TTSModel(nn.Module):
             total_generated_samples * 1000 / self.config.mimi.sample_rate
         )
         generation_time = int((time.monotonic() - t_generating) * 1000)
-        real_time_factor = duration_generated_audio / generation_time
-
-        logger.info(
-            "Generated: %d ms of audio in %d ms so %.2fx faster than real-time",
-            duration_generated_audio,
-            generation_time,
-            real_time_factor,
-        )
+        if generation_time <= 0:
+            logger.info(
+                "Generated: %d ms of audio in %d ms (real-time factor unavailable)",
+                duration_generated_audio,
+                generation_time,
+            )
+        else:
+            real_time_factor = duration_generated_audio / generation_time
+            logger.info(
+                "Generated: %d ms of audio in %d ms so %.2fx faster than real-time",
+                duration_generated_audio,
+                generation_time,
+                real_time_factor,
+            )
 
     @torch.no_grad
     def _generate(
@@ -537,7 +628,7 @@ class TTSModel(nn.Module):
                 backbone_input = next_latent
             steps_times.append(timer.elapsed_time_ms)
         else:
-            if os.environ.get("KPOCKET_TTS_ERROR_WITHOUT_EOS", "0") == "1":
+            if os.environ.get("POCKET_TTS_ERROR_WITHOUT_EOS", "0") == "1":
                 raise RuntimeError("Generation reached maximum length without EOS!")
             logger.warning(
                 "Maximum generation length reached without EOS, this very often indicates an error."
@@ -545,13 +636,51 @@ class TTSModel(nn.Module):
 
         # Add sentinel value to signal end of generation
         latents_queue.put(None)
-        logger.info("Average generation step time: %d ms", int(statistics.mean(steps_times)))
+        if steps_times:
+            logger.info("Average generation step time: %d ms", int(statistics.mean(steps_times)))
+        else:
+            logger.info("No generation steps recorded")
 
-    @lru_cache(maxsize=2)
+    @torch.no_grad
+    def _apply_audio_continuation(self, model_state: dict, audio: torch.Tensor) -> None:
+        if audio.numel() == 0:
+            return
+        audio = audio.to(torch.float32)
+        if audio.ndim != 1:
+            audio = audio.flatten()
+        max_samples = int(self.config.mimi.sample_rate * 2.0)
+        if audio.shape[0] > max_samples:
+            audio = audio[-max_samples:]
+        continuation = audio.unsqueeze(0).unsqueeze(0).to(self.device)
+        conditioning = self._encode_audio(continuation)
+        self._run_flow_lm_and_increment_step(
+            model_state=model_state, audio_conditioning=conditioning
+        )
+
+    def _init_voice_prompt_cache(self) -> None:
+        cache_size_raw = os.environ.get("POCKET_TTS_VOICE_CACHE_SIZE", "2")
+        try:
+            cache_size = int(cache_size_raw)
+        except ValueError:
+            cache_size = 2
+        if cache_size <= 0:
+            self._voice_prompt_cache = None
+            return
+        self._voice_prompt_cache = lru_cache(maxsize=cache_size)(
+            self._get_state_for_audio_prompt_uncached
+        )
+
+    def _get_state_for_audio_prompt_uncached(
+        self, audio_conditioning: Path | str | torch.Tensor, truncate: bool
+    ) -> dict:
+        return self.get_state_for_audio_prompt(audio_conditioning, truncate)
+
     def _cached_get_state_for_audio_prompt(
         self, audio_conditioning: Path | str | torch.Tensor, truncate: bool = False
     ) -> dict:
-        return self.get_state_for_audio_prompt(audio_conditioning, truncate)
+        if isinstance(audio_conditioning, torch.Tensor) or self._voice_prompt_cache is None:
+            return self.get_state_for_audio_prompt(audio_conditioning, truncate)
+        return self._voice_prompt_cache(audio_conditioning, truncate)
 
     @torch.no_grad
     def get_state_for_audio_prompt(
@@ -592,7 +721,7 @@ class TTSModel(nn.Module):
         """
         if isinstance(audio_conditioning, str) and audio_conditioning in PREDEFINED_VOICES:
             # We get the audio conditioning directly from the safetensors file.
-            prompt = load_predefined_voice(audio_conditioning)
+            prompt = load_predefined_voice(audio_conditioning).to(self.device)
         else:
             if not self.has_voice_cloning and isinstance(audio_conditioning, (str, Path)):
                 raise ValueError(
@@ -618,6 +747,20 @@ class TTSModel(nn.Module):
                 audio_conditioning = convert_audio(
                     audio, conditioning_sample_rate, self.config.mimi.sample_rate, 1
                 )
+
+            if not isinstance(audio_conditioning, torch.Tensor):
+                raise TypeError(
+                    "Audio prompt must be a path, URL, or torch.Tensor with shape [channels, samples]"
+                )
+            if audio_conditioning.numel() == 0:
+                raise ValueError("Audio prompt tensor must be non-empty")
+            if audio_conditioning.ndim == 1:
+                audio_conditioning = audio_conditioning.unsqueeze(0)
+            elif audio_conditioning.ndim != 2:
+                raise ValueError("Audio prompt tensor must have shape [channels, samples]")
+            if audio_conditioning.shape[0] != 1:
+                raise ValueError("Audio prompt tensor must be mono with shape [1, samples]")
+            audio_conditioning = audio_conditioning.to(torch.float32)
 
             with display_execution_time("Encoding audio prompt"):
                 prompt = self._encode_audio(audio_conditioning.unsqueeze(0).to(self.device))

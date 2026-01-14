@@ -134,3 +134,8 @@ The `download_if_necessary()` utility handles `hf://` URLs and caches locally.
 3. **uv Python Preference**: Set to "only-managed" in pyproject.toml because system Python may lack headers.
 4. **CPU-Only PyTorch**: Uses PyTorch CPU index from `download.pytorch.org/whl/cpu` in uv config.
 5. **Web Dependencies**: FastAPI and Uvicorn are included for server functionality.
+
+## Auto-ops (Ralph)
+- Guardrails: `.ralph/guardrails.md`
+- Loop script: `.ralph/loop.sh` (override verification with `VERIFY_CMD=...`)
+- Logs: `.ralph/progress.log` and `.ralph/errors.log`

@@ -19,6 +19,8 @@ This will generate a WAV file `./tts_output.wav` with the default text and voice
 - `--text TEXT`: Text to generate (default: "Hello world! I am Kyutai Pocket TTS. I'm fast enough to run on small CPUs. I hope you'll like me.")
 - `--voice VOICE`: Path to audio conditioning file (voice to clone) (default: "hf://kyutai/tts-voices/alba-mackenna/casual.wav"). Urls and local paths are supported.
 - `--output-path OUTPUT_PATH`: Output path for generated audio (default: "./tts_output.wav")
+- `--ssml`: Interpret `--text` as SSML-lite markup (supports `<voice>`, `<break>`, `<prosody>`, and `<emphasis>`).
+- `--preset PRESET`: Sampling preset to apply (examples: `broadcast`, `calm`, `expressive`, `dramatic`, `slow`, `fast`).
 
 ### Generation Parameters
 
@@ -58,6 +60,19 @@ pocket-tts generate --voice "hf://kyutai/tts-voices/jessica-jian/casual.wav"
 # Use local voice file
 pocket-tts generate --voice "./my_voice.wav"
 ```
+
+### SSML-lite Markup
+
+```bash
+pocket-tts generate --ssml --text '<speak>Hello <break time="300ms"/> world.</speak>'
+pocket-tts generate --ssml --text '<speak><voice name="alba">Hi.</voice> <voice name="marius">Hello.</voice></speak>'
+pocket-tts generate --ssml --text '<speak><emphasis level="strong">Big moment.</emphasis></speak>'
+pocket-tts generate --ssml --text '<speak><prosody rate="slow">Take it easy.</prosody></speak>'
+```
+
+`<emphasis>` and `<prosody>` map to sampling presets. You can also set `<prosody preset="broadcast">` to pick a preset directly.
+`rate="slow"` inserts short pauses between words and time-stretches the segment; `rate="fast"` shortens it. `<emphasis>` adds a small gain boost.
+Segments under `<emphasis>` and `<prosody>` are RMS-normalized; time-stretching uses resampling and will shift pitch slightly.
 
 ### Quality Tuning
 

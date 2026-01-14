@@ -8,6 +8,8 @@ Kyutai Pocket TTS provides a Python API for integrating text-to-speech capabilit
 pip install pocket-tts
 ```
 
+Tip: set `POCKET_TTS_TORCH_THREADS` to control `torch.set_num_threads` (default: 1).
+
 ## Quick Start
 
 ```python
@@ -170,6 +172,45 @@ for chunk in model.generate_audio_stream(voice_state, "Long text content..."):
 ```
 
 ## Advanced Usage
+
+### Convenience Helpers
+
+##### `generate_audio_from_text(text, voice=..., preset=None, frames_after_eos=None, copy_state=True, truncate_voice=False)`
+
+Generate audio directly from text without manually managing voice state.
+
+**Parameters:**
+- `text` (str): Text to synthesize.
+- `voice` (Path | str | torch.Tensor | dict): Voice prompt or a precomputed model state.
+- `preset` (str | GenerationPreset | None): Optional preset to apply (sampling parameters).
+- `frames_after_eos` (int | None): Frames to generate after EOS detection.
+- `copy_state` (bool): Whether to copy the state before generation.
+- `truncate_voice` (bool): Truncate voice prompts longer than 30s.
+
+**Example:**
+```python
+from pocket_tts import TTSModel
+
+model = TTSModel.load_model()
+audio = model.generate_audio_from_text(
+    "Hello world!",
+    voice="hf://kyutai/tts-voices/alba-mackenna/casual.wav",
+    preset="broadcast",
+)
+```
+
+##### `generate_audio_stream_from_text(...)`
+
+Streaming counterpart that yields audio chunks:
+
+```python
+for chunk in model.generate_audio_stream_from_text(
+    "Longer content...",
+    voice="hf://kyutai/tts-voices/alba-mackenna/casual.wav",
+    preset="broadcast",
+):
+    ...
+```
 
 ### Voice Management
 
